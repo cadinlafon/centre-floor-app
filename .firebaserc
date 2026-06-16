@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "centerfloorfitness"
+  },
+  "targets": {
+    "centerfloorfitness": {
+      "hosting": {
+        "app": [
+          "app-centrefloor"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
