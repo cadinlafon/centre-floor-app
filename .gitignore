@@ -26,6 +26,9 @@ dist-ssr
 # Local Netlify folder
 .netlify
 
+# Local Firebase CLI deploy cache
+.firebase
+
 # Environment variables / secrets — never commit real values
 .env
 .env.local

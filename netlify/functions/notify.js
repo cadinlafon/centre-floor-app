@@ -131,7 +131,18 @@ async function getCallerUser(db, event) {
     : { id: decoded.uid, authId: decoded.uid };
 }
 
-export async function handler(event) {
+// The frontend is served from Firebase Hosting (a different origin than this
+// Netlify function), so every response needs CORS headers or the browser
+// will block it even though the request itself succeeds. The POST body is
+// JSON with a custom Authorization header, so the browser also sends an
+// OPTIONS preflight first — handled in the exported `handler` wrapper below.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+async function handleRequest(event) {
   const db = getFirestore();
   if (!db) {
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: 'Notification service is not configured.' }) };
@@ -297,6 +308,14 @@ export async function handler(event) {
   } catch (error) {
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: error.message }) };
   }
+}
+
+export async function handler(event) {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+  }
+  const result = await handleRequest(event);
+  return { ...result, headers: { ...(result.headers || {}), ...CORS_HEADERS } };
 }
 
 export default handler;

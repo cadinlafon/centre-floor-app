@@ -273,8 +273,13 @@ function buildScheduleStatus(event) {
   return null;
 }
 
+function getCalendarFunctionUrl() {
+  const fromEnv = import.meta.env.VITE_CALENDAR_FUNCTION_URL;
+  return typeof fromEnv === 'string' && fromEnv.trim() ? fromEnv.trim() : '/.netlify/functions/calendar';
+}
+
 async function fetchNextEvent() {
-  const response = await fetch('/.netlify/functions/calendar');
+  const response = await fetch(getCalendarFunctionUrl());
   const text = await response.text();
 
   if (!response.ok || !text) {

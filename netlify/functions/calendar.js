@@ -100,11 +100,23 @@ function pickNextEvent(events) {
   return upcoming[0] || null;
 }
 
+// The frontend is served from Firebase Hosting (a different origin than this
+// Netlify function), so every response needs CORS headers or the browser
+// will block it even though the request itself succeeds.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+};
+
 export const handler = async (event) => {
+  if (event?.httpMethod === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (event?.httpMethod && event.httpMethod !== 'GET') {
     return new Response(JSON.stringify({ ok: false, error: 'Method not allowed' }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     });
   }
 
@@ -120,12 +132,12 @@ export const handler = async (event) => {
 
     return new Response(JSON.stringify({ ok: true, event: nextEvent }), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     });
   } catch (error) {
     return new Response(JSON.stringify({ ok: false, error: error.message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
     });
   }
 };

@@ -38,18 +38,27 @@ export async function registerPushNotifications(userProfile, options = {}) {
   const userDocId = userProfile?.docId || uid;
   if (!uid || !ONESIGNAL_ENABLED || !('Notification' in window)) return null;
 
-  const OneSignal = await loadOneSignal();
-  if (!OneSignal) return null;
-
   const shouldRequestPermission = options.requestPermission === true;
-  const permission = Notification.permission === 'default'
-    ? (shouldRequestPermission ? await Promise.race([
-        Notification.requestPermission(),
-        new Promise((resolve) => setTimeout(() => resolve('timeout'), 8000)),
-      ]) : 'default')
-    : Notification.permission;
+
+  // Ask the browser's real, native permission dialog FIRST — before loading
+  // the OneSignal SDK script or doing anything else async. Browsers only
+  // reliably show this prompt as a direct continuation of the user's click;
+  // inserting an awaited network fetch (loadOneSignal below) ahead of it can
+  // burn through the "user activation" window and cause the call to resolve
+  // silently instead of actually showing the system dialog.
+  let permission = Notification.permission;
+  if (permission === 'default') {
+    if (!shouldRequestPermission) return null;
+    permission = await Promise.race([
+      Notification.requestPermission(),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 8000)),
+    ]);
+  }
 
   if (permission !== 'granted') return null;
+
+  const OneSignal = await loadOneSignal();
+  if (!OneSignal) return null;
 
   if (!window.OneSignal?.User) {
     await OneSignal.init({

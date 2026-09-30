@@ -470,8 +470,8 @@ export default function Account({ userProfile }) {
   async function handleEnableNotifications() {
     setNotifState('busy');
     try {
-      await registerPushNotifications(userProfile);
-      setNotifState('enabled');
+      const playerId = await registerPushNotifications(userProfile, { requestPermission: true });
+      setNotifState(playerId ? 'enabled' : 'error');
     } catch (err) {
       console.error(err);
       setNotifState('error');
