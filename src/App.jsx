@@ -116,6 +116,7 @@ export default function App() {
   const { user, userProfile, loading } = useAuth();
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [promptBusy, setPromptBusy] = useState(false);
+  const [promptError, setPromptError] = useState('');
 
   useEffect(() => {
     if (!userProfile?.uid) return;
@@ -152,16 +153,17 @@ export default function App() {
   async function handleEnableNotifications() {
     if (!userProfile?.uid) return;
     setPromptBusy(true);
+    setPromptError('');
     try {
       const result = await registerPushNotifications(userProfile, { requestPermission: true });
       if (result) {
         setShowNotificationPrompt(false);
       } else {
-        setShowNotificationPrompt(false);
+        setPromptError("Couldn't enable notifications on this device. You can try again later from your Account page.");
       }
     } catch (err) {
       console.error('Notification prompt failed:', err);
-      setShowNotificationPrompt(false);
+      setPromptError(err.message || "Couldn't enable notifications on this device.");
     } finally {
       setPromptBusy(false);
     }
@@ -177,10 +179,13 @@ export default function App() {
           <PromptCard>
             <PromptTitle>Enable notifications</PromptTitle>
             <PromptBody>Allow push notifications so you never miss announcements, class messages, and account updates.</PromptBody>
+            {promptError && <PromptBody style={{ color: '#dc2626' }}>{promptError}</PromptBody>}
             <PromptActions>
-              <PromptButton onClick={() => setShowNotificationPrompt(false)}>Not now</PromptButton>
+              <PromptButton onClick={() => { setShowNotificationPrompt(false); setPromptError(''); }}>
+                {promptError ? 'Close' : 'Not now'}
+              </PromptButton>
               <PromptButton $primary onClick={handleEnableNotifications} disabled={promptBusy}>
-                {promptBusy ? 'Opening…' : 'Allow'}
+                {promptBusy ? 'Enabling…' : 'Allow'}
               </PromptButton>
             </PromptActions>
           </PromptCard>

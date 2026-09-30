@@ -204,7 +204,7 @@ export default function AdminNotifications({ userProfile }) {
       }
     } catch (err) {
       console.error(err);
-      setMessage('Failed to add the player ID.');
+      setMessage(err.message || 'Failed to add the player ID.');
     } finally {
       setBusyIds(prev => prev.filter(id => id !== 'player-id'));
     }

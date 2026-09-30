@@ -222,6 +222,7 @@ export default function Account({ userProfile }) {
 
   const [busy, setBusy] = useState(false);
   const [notifState, setNotifState] = useState('idle');
+  const [notifMsg, setNotifMsg] = useState('');
 
   useEffect(() => {
     async function loadPendingRequest() {
@@ -469,12 +470,19 @@ export default function Account({ userProfile }) {
 
   async function handleEnableNotifications() {
     setNotifState('busy');
+    setNotifMsg('');
     try {
       const playerId = await registerPushNotifications(userProfile, { requestPermission: true });
-      setNotifState(playerId ? 'enabled' : 'error');
+      if (playerId) {
+        setNotifState('enabled');
+      } else {
+        setNotifState('error');
+        setNotifMsg("Couldn't enable notifications on this device. Please try again.");
+      }
     } catch (err) {
       console.error(err);
       setNotifState('error');
+      setNotifMsg(err.message || 'Failed to enable notifications.');
     }
   }
 
@@ -659,6 +667,7 @@ export default function Account({ userProfile }) {
               <RowLabel>Push Notifications</RowLabel>
               <RowValue>{userProfile?.notificationsEnabled ? 'Enabled' : 'Not enabled yet'}</RowValue>
               <HelpText>Allow browser notifications so the app can alert you about new messages, announcements, requests, and account updates.</HelpText>
+              {notifMsg && <Msg $error={notifState === 'error'}>{notifMsg}</Msg>}
             </div>
             <SaveBtn onClick={handleEnableNotifications} disabled={notifState === 'busy'}>
               {notifState === 'busy' ? 'Enabling…' : 'Enable notifications'}
