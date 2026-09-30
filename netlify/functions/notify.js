@@ -125,10 +125,38 @@ async function sendOneSignal(users, notification, data = {}) {
   return { ok: response.ok, status: response.status, body: text };
 }
 
+// This function gets invoked with a genuine Web API Request-shaped `event`
+// (event.body is a ReadableStream, event.headers is a real Headers object)
+// rather than the classic Lambda shape (event.body as a JSON string,
+// event.headers as a plain object) — these helpers handle both, since which
+// one shows up has proven inconsistent across deploys of this same function.
+function getHeader(event, name) {
+  if (event.headers?.get) return event.headers.get(name) || '';
+  const lower = name.toLowerCase();
+  return event.headers?.[name] || event.headers?.[lower]
+    || event.headers?.[name[0].toUpperCase() + name.slice(1)] || '';
+}
+
+function getMethod(event) {
+  return event.method || event.httpMethod || 'GET';
+}
+
+async function readJsonBody(event) {
+  if (event.body == null) return {};
+  if (typeof event.text === 'function') {
+    // Real Request object — .body is a ReadableStream, consume it properly
+    // rather than trying to JSON.parse the stream object itself.
+    const text = await event.text();
+    return text ? JSON.parse(text) : {};
+  }
+  const raw = event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
+  return raw ? JSON.parse(raw) : {};
+}
+
 /** Resolve the caller's user profile from their Firebase ID token, so we
  * never trust a client-supplied identity for who's allowed to trigger what. */
 async function getCallerUser(db, event) {
-  const authHeader = event.headers?.authorization || event.headers?.Authorization || '';
+  const authHeader = getHeader(event, 'authorization');
   const token = authHeader.replace(/^Bearer\s+/i, '');
   if (!token) return null;
 
@@ -164,8 +192,9 @@ async function handleRequest(event) {
 
   let body;
   try {
-    body = event.body ? JSON.parse(event.body) : {};
-  } catch {
+    body = await readJsonBody(event);
+  } catch (err) {
+    console.error('Invalid JSON body:', err.message);
     return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'Invalid JSON body' }) };
   }
 
@@ -339,7 +368,7 @@ function toResponse(result) {
 }
 
 export async function handler(event) {
-  if (event.httpMethod === 'OPTIONS') {
+  if (getMethod(event) === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
   // handleRequest() has its own try/catch, but a couple of things run before
