@@ -1,4 +1,6 @@
-import admin from 'firebase-admin';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getFirestore as getFirestoreDb } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 const FIREBASE_SERVICE_ACCOUNT_JSON = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '';
 const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID || '';
@@ -18,14 +20,26 @@ const ROOM_PATHS = {
   'tue-thu': '/tue-thu',
 };
 
+// firebase-admin v12+ restructured the classic admin.apps/admin.credential/
+// admin.firestore() namespaced API into modular subpath exports — the old
+// namespaced calls silently don't exist the same way on the default import
+// anymore (admin.apps is undefined, not an empty array), which crashed this
+// function before it could even respond with a real error.
 function getFirestore() {
   if (!FIREBASE_SERVICE_ACCOUNT_JSON) return null;
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)),
-    });
+  if (!getApps().length) {
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON);
+    } catch {
+      // A malformed FIREBASE_SERVICE_ACCOUNT_JSON env var (e.g. the private
+      // key's \n escapes got mangled when pasted into Netlify's UI) throws a
+      // near-useless "Expected property name..." SyntaxError by default.
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON — check the Netlify env var was pasted as the exact, complete file contents on one line.');
+    }
+    initializeApp({ credential: cert(serviceAccount) });
   }
-  return admin.firestore();
+  return getFirestoreDb();
 }
 
 function compactBody(text, maxLength = 120) {
@@ -120,7 +134,7 @@ async function getCallerUser(db, event) {
 
   let decoded;
   try {
-    decoded = await admin.auth().verifyIdToken(token);
+    decoded = await getAuth().verifyIdToken(token);
   } catch {
     return null;
   }
@@ -310,12 +324,40 @@ async function handleRequest(event) {
   }
 }
 
+// Despite this being a classic-style handler (named `handler` export, plain
+// object results), this deployed function is invoked in a mode where
+// Netlify's runtime rejects anything that isn't an actual Response object
+// ("Function returned an unsupported value. Accepted types are 'Response' or
+// 'undefined'") — so the plain {statusCode, headers, body} shape used
+// throughout handleRequest() gets translated into a real Response here at
+// the very end, in one place, rather than rewriting every return site.
+function toResponse(result) {
+  return new Response(result.body ?? '', {
+    status: result.statusCode,
+    headers: { ...(result.headers || {}), ...CORS_HEADERS },
+  });
+}
+
 export async function handler(event) {
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
-  const result = await handleRequest(event);
-  return { ...result, headers: { ...(result.headers || {}), ...CORS_HEADERS } };
+  // handleRequest() has its own try/catch, but a couple of things run before
+  // that (Firestore init, JSON.parse of the service account) — if any of
+  // those throw, this outer catch is what stands between that and Netlify
+  // getting back an empty/crashed response (which shows up client-side as a
+  // 502 "unexpected end of JSON input" instead of a real error message).
+  try {
+    const result = await handleRequest(event);
+    return toResponse(result);
+  } catch (error) {
+    console.error('notify function crashed:', error);
+    return toResponse({
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error: error.message || 'Internal error' }),
+    });
+  }
 }
 
 export default handler;

@@ -108,16 +108,22 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
 };
 
+// Netlify invokes a named `handler` export as a classic (v1) function, which
+// expects a plain { statusCode, headers, body } object back — not a Fetch
+// Response. Returning a Response here (as this file used to) makes Netlify's
+// classic runtime fail with "invalid status code returned from lambda: 0",
+// since it tries to read .statusCode off an object that only has .status.
 export const handler = async (event) => {
   if (event?.httpMethod === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return { statusCode: 204, headers: CORS_HEADERS, body: '' };
   }
 
   if (event?.httpMethod && event.httpMethod !== 'GET') {
-    return new Response(JSON.stringify({ ok: false, error: 'Method not allowed' }), {
-      status: 405,
+    return {
+      statusCode: 405,
       headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    });
+      body: JSON.stringify({ ok: false, error: 'Method not allowed' }),
+    };
   }
 
   try {
@@ -130,15 +136,17 @@ export const handler = async (event) => {
     const events = parseCalendarEvents(icsText);
     const nextEvent = pickNextEvent(events);
 
-    return new Response(JSON.stringify({ ok: true, event: nextEvent }), {
-      status: 200,
+    return {
+      statusCode: 200,
       headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    });
+      body: JSON.stringify({ ok: true, event: nextEvent }),
+    };
   } catch (error) {
-    return new Response(JSON.stringify({ ok: false, error: error.message }), {
-      status: 500,
+    return {
+      statusCode: 500,
       headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    });
+      body: JSON.stringify({ ok: false, error: error.message }),
+    };
   }
 };
 

@@ -2,3 +2,10 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+
+[functions]
+  # firebase-admin's auth module pulls in jwks-rsa -> jose, a CJS/ESM mix
+  # that Netlify's default esbuild bundler can't correctly inline (fails at
+  # runtime with ERR_REQUIRE_ESM). Shipping it as real node_modules files
+  # instead of a bundled blob sidesteps the problem entirely.
+  external_node_modules = ["firebase-admin"]
