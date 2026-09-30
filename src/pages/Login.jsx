@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
+} from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../config';
+import { auth, db } from '../lib/firebase';
 import styled from 'styled-components';
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -134,6 +136,88 @@ const RequestBtn = styled(Link)`
   }
 `;
 
+const ForgotLink = styled.button`
+  display: block;
+  margin: 0.75rem auto 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+
+  &:hover { color: var(--amber); }
+`;
+
+const Modal = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 1.5rem;
+`;
+
+const ModalCard = styled.div`
+  background: var(--bg-card);
+  border-radius: 16px;
+  padding: 2rem 1.75rem;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+
+  h2 {
+    font-family: Georgia, serif;
+    font-size: 1.3rem;
+    color: var(--brown-dark);
+    margin: 0 0 0.5rem;
+  }
+
+  p {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0 0 1.25rem;
+    line-height: 1.5;
+  }
+`;
+
+const ModalBtns = styled.div`
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+`;
+
+const SendResetBtn = styled.button`
+  flex: 1;
+  padding: 0.7rem;
+  background: linear-gradient(135deg, #78350f, #d97706);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+
+  &:hover { opacity: 0.9; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+`;
+
+const CancelModalBtn = styled.button`
+  flex: 1;
+  padding: 0.7rem;
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+`;
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Login() {
@@ -142,6 +226,13 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Forgot password
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSending, setResetSending] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetSent, setResetSent] = useState(false);
 
   async function handleLogin() {
     if (!email || !password) {
@@ -153,29 +244,33 @@ export default function Login() {
     setError('');
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const cred = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
 
-      // Check approval status
-      const snap = await getDoc(doc(db, 'users', cred.user.uid));
-      const profile = snap.data();
+      const profileSnap = await getDoc(doc(db, 'users', cred.user.uid));
 
-      if (profile?.status === 'pending') {
+      if (!profileSnap.exists()) {
+        await signOut(auth);
+        setError('Your account setup is incomplete. Please contact your instructor.');
+        return;
+      }
+
+      const status = profileSnap.data().status;
+      if (status === 'pending') {
         navigate('/pending');
-      } else {
+      } else if (status === 'approved') {
         navigate('/home');
+      } else {
+        await signOut(auth);
+        setError('Your account status is unrecognized. Please contact your instructor.');
       }
     } catch (err) {
-      switch (err.code) {
-        case 'auth/user-not-found':
-        case 'auth/wrong-password':
-        case 'auth/invalid-credential':
-          setError('Incorrect email or password.');
-          break;
-        case 'auth/too-many-requests':
-          setError('Too many attempts. Try again later.');
-          break;
-        default:
-          setError('Something went wrong. Please try again.');
+      const code = err?.code || '';
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+        setError('Incorrect email or password.');
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many attempts. Try again later.');
+      } else {
+        setError('Something went wrong. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -186,11 +281,51 @@ export default function Login() {
     if (e.key === 'Enter') handleLogin();
   }
 
+  function openForgotModal() {
+    setResetEmail(email); // prefill with whatever they already typed
+    setResetError('');
+    setResetSent(false);
+    setShowForgotModal(true);
+  }
+
+  async function handleSendReset() {
+    if (!resetEmail.trim()) {
+      setResetError('Please enter your email address.');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(resetEmail)) {
+      setResetError('Please enter a valid email address.');
+      return;
+    }
+
+    setResetSending(true);
+    setResetError('');
+
+    try {
+      await sendPasswordResetEmail(auth, resetEmail.trim().toLowerCase());
+      setResetSent(true);
+    } catch (err) {
+      const code = err?.code || '';
+      if (code === 'auth/invalid-email') {
+        setResetError('Please enter a valid email address.');
+      } else if (code === 'auth/too-many-requests') {
+        setResetError('Too many attempts. Please try again later.');
+      } else {
+        // Firebase's user-not-found case is intentionally treated the same
+        // as success below, so this doesn't leak which emails have accounts.
+        setResetSent(true);
+      }
+    } finally {
+      setResetSending(false);
+    }
+  }
+
   return (
     <Page>
       <Card>
         <Logo>
-          <h1>Centre Floor</h1>
+          <h1>Élan</h1>
           <p>Sign in to your account</p>
         </Logo>
 
@@ -224,12 +359,64 @@ export default function Login() {
 
         {error && <ErrorMsg>{error}</ErrorMsg>}
 
+        <ForgotLink onClick={openForgotModal}>Forgot password?</ForgotLink>
+
         <Divider>or</Divider>
 
         <RequestBtn to="/request-access">
           Request Access
         </RequestBtn>
       </Card>
+
+      {showForgotModal && (
+        <Modal onClick={e => e.target === e.currentTarget && setShowForgotModal(false)}>
+          <ModalCard>
+            {resetSent ? (
+              <>
+                <h2>Check your email</h2>
+                <p>
+                  If an account exists for <strong>{resetEmail}</strong>, we've sent a link to reset your password.
+                  It may take a few minutes to arrive — check your spam folder too.
+                </p>
+                <ModalBtns>
+                  <SendResetBtn onClick={() => setShowForgotModal(false)}>
+                    Got it
+                  </SendResetBtn>
+                </ModalBtns>
+              </>
+            ) : (
+              <>
+                <h2>Reset your password</h2>
+                <p>Enter your email and we'll send you a link to reset your password.</p>
+
+                <Field style={{ marginBottom: '0.5rem' }}>
+                  <label>Email</label>
+                  <input
+                    type="email"
+                    placeholder="you@email.com"
+                    value={resetEmail}
+                    onChange={e => setResetEmail(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSendReset(); }}
+                    autoComplete="email"
+                    autoFocus
+                  />
+                </Field>
+
+                {resetError && <ErrorMsg>{resetError}</ErrorMsg>}
+
+                <ModalBtns>
+                  <CancelModalBtn onClick={() => setShowForgotModal(false)} disabled={resetSending}>
+                    Cancel
+                  </CancelModalBtn>
+                  <SendResetBtn onClick={handleSendReset} disabled={resetSending}>
+                    {resetSending ? 'Sending…' : 'Send Reset Link'}
+                  </SendResetBtn>
+                </ModalBtns>
+              </>
+            )}
+          </ModalCard>
+        </Modal>
+      )}
     </Page>
   );
 }

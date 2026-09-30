@@ -1,16 +1,45 @@
-# React + Vite
+# Élan
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Backend: Firebase (Firestore + Auth + Storage). Notifications: OneSignal, sent
+server-side by a Netlify Function that reads Firestore with the Firebase
+Admin SDK. Supabase is fully decommissioned — nothing in this app talks to it
+(the old schema/migrations are kept for reference under `_backup/supabase-era/`).
 
-Currently, two official plugins are available:
+## Notification deployment
+This app uses OneSignal with a Netlify Function (`netlify/functions/notify.js`)
+for server-side notification delivery against Firestore.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### Deploy frontend and functions
+Run:
 
-## React Compiler
+```bash
+netlify deploy --prod
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Deploy Firestore/Storage security rules
+Rules live in `firestore.rules`/`storage.rules` at the repo root. Deploy with:
 
-## Expanding the ESLint configuration
+```bash
+firebase deploy --only firestore:rules,storage:rules
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Storage must be enabled once for the project via Firebase Console → Build →
+Storage → Get Started before `storage:rules` can deploy or profile-photo
+upload will work.
+
+### Required environment variables
+Set these in Netlify's environment (server-side only — never prefix with `VITE_`):
+- `FIREBASE_SERVICE_ACCOUNT_JSON` — the full contents of a Firebase service-account key JSON (Console → Project Settings → Service Accounts → Generate new private key), as a single-line string. Grants full database access — never commit the key file, never put it in the client bundle.
+- `ONESIGNAL_APP_ID`
+- `ONESIGNAL_REST_API_KEY`
+- `SITE_URL` — your deployed site's origin, used to build notification deep links
+
+Set these in the frontend env file (`.env`, safe to expose client-side — Firebase web config values are not secrets):
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_ONESIGNAL_APP_ID`
+- `VITE_ONESIGNAL_SAFARI_WEB_ID`

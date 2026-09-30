@@ -2,13 +2,22 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  server: {
+    proxy: {
+      '/.netlify/functions': {
+        target: 'http://127.0.0.1:8888',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'CentreFloor',
-        short_name: 'CentreFloor',
-        description: 'CentreFloor App',
+        name: 'Élan',
+        short_name: 'Élan',
+        description: 'Élan — class chat, schedule, and announcements',
         start_url: '/',
         display: 'standalone',
         background_color: '#ffffff',

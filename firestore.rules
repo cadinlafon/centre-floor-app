@@ -1,0 +1,95 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'superadmin'];
+    }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+
+    match /users/{uid} {
+      allow get: if resource.data.status == 'approved' || isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /accessRequests/{id} {
+      allow create: if request.resource.data.keys().hasAll(['name','email','status']) && request.resource.data.status == 'pending';
+      allow get, list, update, delete: if isAdmin();
+    }
+
+    match /invites/{token} {
+      allow get: if true;
+      allow list, create, delete: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.status == 'pending' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) && request.resource.data.status == 'used');
+    }
+
+    match /announcements/{id} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+    match /pushAlerts/{id} { allow get, list, create, update, delete: if isAdmin(); }
+
+    // Chat messages. Students may create their own messages, edit/delete their own
+    // messages, and reply/attach data when creating. Admins may moderate all messages.
+    match /messages/{id} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isSignedIn() &&
+        ((resource.data.senderId == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','edited','editedAt'])) ||
+         (isAdmin() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text','edited','editedAt','pinned'])));
+      allow delete: if isSignedIn() && (resource.data.senderId == request.auth.uid || isAdmin());
+    }
+
+    // One reaction document per user/message. The deterministic ID prevents duplicates.
+    match /messageReactions/{id} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /savedMessages/{id} {
+      allow get, list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+    }
+
+    match /messageReads/{id} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /chatTyping/{id} {
+      allow get, list: if isSignedIn();
+      allow create, update: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /classChangeRequests/{id} { allow get, list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin()); allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid; allow update, delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid); }
+    match /accountRemovalRequests/{id} { allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid; allow get, list, update, delete: if isAdmin(); }
+    match /bugReports/{id} { allow get, list: if isSignedIn(); allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid; allow update, delete: if isAdmin(); }
+    match /featureSuggestions/{id} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && (resource.data.authorId == request.auth.uid || isAdmin() || (resource.data.authorId != request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes']) && ((request.resource.data.upvotes.hasAll(resource.data.upvotes) && request.resource.data.upvotes.removeAll(resource.data.upvotes) == [request.auth.uid]) || (resource.data.upvotes.hasAll(request.resource.data.upvotes) && resource.data.upvotes.removeAll(request.resource.data.upvotes) == [request.auth.uid]))));
+      allow delete: if isAdmin();
+    }
+    match /bugReportComments/{id} { allow get, list: if isSignedIn(); allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid; allow update, delete: if isAdmin(); }
+    match /featureSuggestionComments/{id} { allow get, list: if isSignedIn(); allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid; allow update, delete: if isAdmin(); }
+    match /workouts/{id} { allow get, list: if isSignedIn(); allow create, update, delete: if isAdmin(); }
+    match /videos/{id} { allow get, list: if isSignedIn(); allow create, update, delete: if isAdmin(); }
+    match /system_settings/{key} { allow get, list, create, update, delete: if isAdmin(); }
+    match /homeMessages/{id} { allow get, list, create, update, delete: if isAdmin(); }
+    match /threads/{id} { allow get, list, create, update, delete: if isAdmin(); match /{document=**} { allow get, list, create, update, delete: if isAdmin(); } }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -22,3 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local Netlify folder
+.netlify
+
+# Environment variables / secrets — never commit real values
+.env
+.env.local
+.env.*.local
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
+
+# Local dev tooling / snapshots — not part of the app
+.npm-cache
+_backup
+.claude
+.agents

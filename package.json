@@ -5,15 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:netlify": "netlify dev",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "firebase": "^12.14.0",
+    "@emailjs/browser": "^4.4.1",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.5.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.0",
+    "recharts": "^3.9.0",
     "styled-components": "^6.4.2"
   },
   "devDependencies": {

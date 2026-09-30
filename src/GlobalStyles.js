@@ -20,10 +20,32 @@ const GlobalStyles = createGlobalStyle`
     --text-muted: #a8a29e;
 
     /* UI */
-    --border: #e7d5b3;
+    --border: #c89116;
     --shadow: rgba(120, 53, 15, 0.08);
 
-    /* Layout */  }
+    /* Radius scale */
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-pill: 999px;
+
+    /* Shadow scale */
+    --shadow-sm: 0 1px 6px var(--shadow);
+    --shadow-md: 0 4px 16px var(--shadow);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.18);
+
+    /* Feedback colors */
+    --success: #166534;
+    --success-bg: #f0fdf4;
+    --warning: #92400e;
+    --warning-bg: #fef3c7;
+    --error: #dc2626;
+    --error-bg: #fef2f2;
+
+    /* Layout */
+    --topbar-height: 64px;
+    --bottomnav-height: 72px;
+  }
 
   *, *::before, *::after {
     box-sizing: border-box;
@@ -60,7 +82,6 @@ const GlobalStyles = createGlobalStyle`
 
   #root {
     height: 100%;
-    padding-top: var(--topbar-height);
   }
 `;
 

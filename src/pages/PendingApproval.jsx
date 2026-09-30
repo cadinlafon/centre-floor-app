@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { auth } from '../config';
+import { auth } from '../lib/firebase';
 import styled from 'styled-components';
 
 const Page = styled.div`

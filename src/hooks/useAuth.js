@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '../config';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 
 /**
- * useAuth — returns the current Firebase user + their Firestore profile.
+ * useAuth — returns the current Firebase user + their profile from Firestore.
  * Profile updates in real-time (e.g. if admin changes their class or role).
  */
 export function useAuth() {
@@ -12,40 +12,50 @@ export function useAuth() {
   const [userProfile, setUserProfile] = useState(null);
 
   useEffect(() => {
-    let profileUnsub = null;
+    let profileUnsubscribe = null;
 
-    const authUnsub = onAuthStateChanged(auth, (firebaseUser) => {
+    const authUnsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
 
-      // Clean up previous profile listener
-      if (profileUnsub) profileUnsub();
+      if (profileUnsubscribe) {
+        profileUnsubscribe();
+        profileUnsubscribe = null;
+      }
 
       if (firebaseUser) {
-        // Live-listen to profile so role/class changes reflect instantly
-        profileUnsub = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
-          setUserProfile(snap.exists() ? { uid: firebaseUser.uid, ...snap.data() } : null);
-        });
+        profileUnsubscribe = onSnapshot(
+          doc(db, 'users', firebaseUser.uid),
+          (snap) => {
+            if (!snap.exists()) {
+              setUserProfile(null);
+              return;
+            }
+            setUserProfile({ uid: snap.id, ...snap.data() });
+          },
+          (err) => {
+            console.error('Failed to load user profile:', err);
+            setUserProfile(null);
+          }
+        );
       } else {
         setUserProfile(null);
       }
     });
 
     return () => {
-      authUnsub();
-      if (profileUnsub) profileUnsub();
+      authUnsubscribe();
+      if (profileUnsubscribe) profileUnsubscribe();
     };
   }, []);
 
   const loading = user === undefined;
   const isAdmin = ['admin', 'superadmin'].includes(userProfile?.role);
-  const isSuperAdmin = userProfile?.role === 'superadmin';
 
-  // Which chat rooms this user can access
   const chatAccess = {
     monWed: ['monwed', 'both'].includes(userProfile?.class),
     tueThu: ['tuethu', 'both'].includes(userProfile?.class),
-    classChat: !!userProfile, // all approved users
+    classChat: !!userProfile,
   };
 
-  return { user, userProfile, loading, isAdmin, isSuperAdmin, chatAccess };
+  return { user, userProfile, loading, isAdmin, chatAccess };
 }

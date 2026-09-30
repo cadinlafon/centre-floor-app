@@ -1,203 +1,349 @@
-import { useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import { auth, db } from '../config';
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
+import { uploadProfilePhoto } from '../lib/storage';
+import { triggerNotification } from '../utils/notifyServer';
+import styled from 'styled-components';
+
+const Page = styled.div`
+  min-height: 100vh; background: var(--bg-primary);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem;
+`;
+const Card = styled.div`
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 2.5rem 2rem; width: 100%; max-width: 420px; box-shadow: 0 4px 24px var(--shadow);
+`;
+const Logo = styled.div`
+  text-align: center; margin-bottom: 1.5rem;
+  h1 { font-family: Georgia, serif; font-size: 2rem; color: var(--brown-dark); margin: 0 0 0.25rem; }
+  p { font-size: 0.9rem; color: var(--text-muted); margin: 0; }
+`;
+const EmailChip = styled.div`
+  background: var(--bg-secondary); border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 0.75rem 1rem; text-align: center; margin-bottom: 1.5rem;
+  font-size: 0.95rem; color: var(--brown-dark); font-weight: 600;
+`;
+const Field = styled.div`
+  margin-bottom: 1.25rem;
+  label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  input { width: 100%; padding: 0.75rem 1rem; border: 1.5px solid var(--border); border-radius: 10px; font-size: 1rem; color: var(--text-primary); background: var(--bg-secondary); box-sizing: border-box; transition: border-color 0.2s;
+    &:focus { outline: none; border-color: var(--amber); } }
+`;
+const SubmitBtn = styled.button`
+  width: 100%; padding: 0.875rem; background: linear-gradient(135deg, #78350f 0%, #d97706 100%);
+  color: white; border: none; border-radius: 10px; font-size: 1rem; font-weight: 600; cursor: pointer;
+  margin-top: 0.5rem; transition: opacity 0.2s;
+  &:hover { opacity: 0.9; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+`;
+const ErrorMsg = styled.p`color: #dc2626; font-size: 0.875rem; margin: 0.75rem 0 0; text-align: center;`;
+const CenterMsg = styled.p`color: var(--text-secondary); font-size: 0.9rem; text-align: center; line-height: 1.6;`;
+const BigIcon = styled.div`font-size: 3rem; text-align: center; margin-bottom: 1rem;`;
+const BackLink = styled(Link)`display: block; text-align: center; margin-top: 1.25rem; color: var(--text-muted); font-size: 0.875rem; text-decoration: none; &:hover { color: var(--amber); }`;
+
+const AvatarPickRow = styled.div`display: flex; flex-direction: column; align-items: center; margin-bottom: 1.5rem;`;
+const AvatarWrap = styled.div`
+  position: relative;
+  width: 96px;
+  height: 96px;
+  cursor: pointer;
+  margin-bottom: 0.75rem;
+
+  &:hover .avatar-overlay { opacity: 1; }
+`;
+const BigAvatar = styled.div`
+  width: 96px; height: 96px; border-radius: 50%;
+  background: linear-gradient(135deg, #78350f, #d97706);
+  color: white; font-size: 2.2rem; font-weight: 700; font-family: Georgia, serif;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  img { width: 100%; height: 100%; object-fit: cover; display: block; }
+`;
+const AvatarOverlay = styled.div`
+  position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 1.4rem;
+  opacity: ${p => p.$busy ? 1 : 0};
+  transition: opacity 0.15s;
+  pointer-events: none;
+`;
+const HiddenFileInput = styled.input`display: none;`;
+const AvatarHint = styled.p`font-size: 0.8rem; color: var(--text-muted); margin: 0; text-align: center;`;
+const SkipBtn = styled.button`
+  width: 100%; padding: 0.8rem; background: var(--bg-secondary);
+  border: 1.5px solid var(--border); color: var(--text-secondary);
+  border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  margin-top: 0.6rem; transition: border-color 0.2s;
+  &:hover { border-color: var(--amber); color: var(--amber); }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+`;
 
 export default function SetPassword() {
-  const [searchParams] = useSearchParams();
+  const { token } = useParams();
+  const navigate = useNavigate();
+
+  const [status, setStatus] = useState('checking'); // checking | valid | invalid | expired | used | photo
+  const [invite, setInvite] = useState(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+  const [submitting, setSubmitting] = useState(false);
 
-  const email = searchParams.get('email');
+  const [newUid, setNewUid] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const fileInputRef = useRef(null);
 
-  const handleSetPassword = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    async function checkToken() {
+      try {
+        // invites/{token} — the doc ID IS the token, so an unauthenticated
+        // visitor can `get` only this one document if they have the exact
+        // link, without being able to list/enumerate the collection.
+        const snap = await getDoc(doc(db, 'invites', token));
+        if (!snap.exists()) {
+          setStatus('invalid');
+          return;
+        }
+        const data = snap.data();
+
+        if (data.status === 'used') {
+          setStatus('used');
+          return;
+        }
+        const expiresAt = data.expiresAt?.toDate ? data.expiresAt.toDate() : new Date(data.expiresAt);
+        if (expiresAt && expiresAt < new Date()) {
+          setStatus('expired');
+          return;
+        }
+
+        setInvite({
+          id: token,
+          email: data.email,
+          name: data.name,
+          class: data.class,
+        });
+        setStatus('valid');
+      } catch (err) {
+        console.error(err);
+        setStatus('invalid');
+      }
+    }
+    checkToken();
+  }, [token]);
+
+  async function handleSubmit() {
     setError('');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
 
-    if (password !== confirmPassword) return setError("Passwords don't match.");
-    if (password.length < 6) return setError("Password must be at least 6 characters.");
-
-    setLoading(true);
-
+    setSubmitting(true);
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', email), where('status', '==', 'approved'));
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
-        throw new Error("No approved application found for this email. Please contact your instructor.");
+      let cred;
+      try {
+        cred = await createUserWithEmailAndPassword(auth, invite.email, password);
+      } catch (signUpError) {
+        setError(
+          signUpError.code === 'auth/email-already-in-use'
+            ? 'An account with this email already exists. Try signing in.'
+            : 'Something went wrong. Please try again.'
+        );
+        return;
       }
 
-      const userDoc = querySnapshot.docs[0];
-      const userDocRef = doc(db, 'users', userDoc.id);
+      const newUserId = cred.user.uid;
 
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const newUser = userCredential.user;
+      await setDoc(doc(db, 'users', newUserId), {
+        name: invite.name,
+        email: invite.email,
+        role: 'student',
+        class: invite.class,
+        status: 'approved',
+        passwordSetAt: serverTimestamp(),
+      });
 
-      await updateDoc(userDocRef, { uid: newUser.uid, status: 'active' });
-      navigate('/dashboard');
+      // invite.id is the token — invites/{token} — see checkToken above.
+      await updateDoc(doc(db, 'invites', invite.id), { status: 'used' });
+
+      await triggerNotification('password-set', {
+        userId: newUserId,
+        name: invite.name,
+        email: invite.email,
+      });
+
+      setNewUid(newUserId);
+      setStatus('photo');
     } catch (err) {
+      setError('Something went wrong. Please try again.');
       console.error(err);
-      setError(err.message || "Failed to create account.");
+    } finally {
+      setSubmitting(false);
     }
-    setLoading(false);
-  };
+  }
 
-  if (!email) {
-    return (
-      <div style={containerStyle}>
-        <div style={cardStyle}>
-          <div style={logoMarkStyle}>CF</div>
-          <p style={{ color: '#8a7060', textAlign: 'center', fontFamily: "'system-ui', sans-serif", marginTop: '16px' }}>
-            Invalid link. Please request a new invite from your instructor.
-          </p>
-        </div>
-      </div>
-    );
+  function handlePickPhoto() {
+    if (!uploadingPhoto) fileInputRef.current?.click();
+  }
+
+  function handlePhotoSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setPhotoError('');
+    if (!file.type.startsWith('image/')) {
+      setPhotoError('Please choose an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoError('Image must be under 5MB.');
+      return;
+    }
+
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
+  async function handleSavePhotoAndContinue() {
+    if (!photoFile || !newUid) {
+      navigate('/home');
+      return;
+    }
+    setUploadingPhoto(true);
+    setPhotoError('');
+    try {
+      const targetUid = newUid;
+      if (!targetUid) {
+        throw new Error('Missing uid for photo upload during signup.');
+      }
+
+      const url = await uploadProfilePhoto(targetUid, photoFile);
+      await updateDoc(doc(db, 'users', targetUid), { photoURL: url });
+      navigate('/home');
+    } catch (err) {
+      console.error('[photo upload] failed', err);
+      setPhotoError('Failed to upload photo. You can add one later from your Account page.');
+      setUploadingPhoto(false);
+    }
+  }
+
+  function handleSkipPhoto() {
+    navigate('/home');
   }
 
   return (
-    <div style={containerStyle}>
-      <div style={cardStyle}>
-        <div style={logoAreaStyle}>
-          <div style={logoMarkStyle}>CF</div>
-          <h1 style={headingStyle}>Almost there!</h1>
-          <p style={subheadingStyle}>
-            Set a password for <strong style={{ color: '#5a3e2b' }}>{email}</strong>
-          </p>
-        </div>
+    <Page>
+      <Card>
+        <Logo>
+          <h1>Élan</h1>
+          <p>{status === 'photo' ? "You're all set!" : 'Set up your password'}</p>
+        </Logo>
 
-        {error && <div style={errorStyle}>{error}</div>}
+        {status === 'checking' && (
+          <CenterMsg>Checking your invite link…</CenterMsg>
+        )}
 
-        <form onSubmit={handleSetPassword}>
-          <div style={inputGroupStyle}>
-            <label style={labelStyle}>Create a password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              style={inputStyle}
-              placeholder="Min. 6 characters"
-            />
-          </div>
+        {status === 'invalid' && (
+          <>
+            <BigIcon>⚠️</BigIcon>
+            <CenterMsg>This invite link isn't valid. Please check the link from your email, or contact your instructor.</CenterMsg>
+          </>
+        )}
 
-          <div style={inputGroupStyle}>
-            <label style={labelStyle}>Confirm password</label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-              style={inputStyle}
-              placeholder="Re-enter your password"
-            />
-          </div>
+        {status === 'expired' && (
+          <>
+            <BigIcon>⌛</BigIcon>
+            <CenterMsg>This invite link has expired. Please contact your instructor for a new one.</CenterMsg>
+          </>
+        )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={loading ? { ...buttonStyle, opacity: 0.7 } : buttonStyle}
-          >
-            {loading ? 'Creating account…' : 'Enter the App'}
-          </button>
-        </form>
-      </div>
-    </div>
+        {status === 'used' && (
+          <>
+            <BigIcon>✅</BigIcon>
+            <CenterMsg>This invite has already been used. If this is your account, try signing in instead.</CenterMsg>
+          </>
+        )}
+
+        {status === 'valid' && invite && (
+          <>
+            <EmailChip>{invite.email}</EmailChip>
+
+            <Field>
+              <label>Password</label>
+              <input
+                type="password"
+                placeholder="At least 8 characters"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field>
+              <label>Confirm Password</label>
+              <input
+                type="password"
+                placeholder="Re-enter your password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
+              />
+            </Field>
+
+            <SubmitBtn onClick={handleSubmit} disabled={submitting}>
+              {submitting ? 'Creating account…' : 'Set Password & Continue'}
+            </SubmitBtn>
+
+            {error && <ErrorMsg>{error}</ErrorMsg>}
+          </>
+        )}
+
+        {status === 'photo' && (
+          <>
+            <AvatarPickRow>
+              <AvatarWrap onClick={handlePickPhoto} title="Add a profile photo">
+                <BigAvatar>
+                  {photoPreview ? <img src={photoPreview} alt="Preview" /> : (invite?.name?.[0]?.toUpperCase() || '?')}
+                </BigAvatar>
+                <AvatarOverlay className="avatar-overlay" $busy={uploadingPhoto}>
+                  {uploadingPhoto ? '…' : '📷'}
+                </AvatarOverlay>
+              </AvatarWrap>
+              <HiddenFileInput
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoSelected}
+              />
+              <AvatarHint>
+                {photoPreview ? 'Looking good! Tap to change.' : 'Want to add a profile photo?'}
+              </AvatarHint>
+            </AvatarPickRow>
+
+            {photoError && <ErrorMsg>{photoError}</ErrorMsg>}
+
+            <SubmitBtn onClick={handleSavePhotoAndContinue} disabled={uploadingPhoto}>
+              {uploadingPhoto ? 'Uploading…' : photoPreview ? 'Save Photo & Continue' : 'Continue'}
+            </SubmitBtn>
+            <SkipBtn onClick={handleSkipPhoto} disabled={uploadingPhoto}>
+              Skip for now
+            </SkipBtn>
+          </>
+        )}
+
+        {status !== 'photo' && <BackLink to="/login">← Back to sign in</BackLink>}
+      </Card>
+    </Page>
   );
 }
-
-const containerStyle = {
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-  minHeight: '100vh',
-  backgroundColor: '#fdf8f3',
-  padding: '20px',
-  fontFamily: "'Georgia', serif",
-};
-const cardStyle = {
-  background: '#ffffff',
-  padding: '44px 40px',
-  borderRadius: '16px',
-  boxShadow: '0 4px 24px rgba(139,90,43,0.10)',
-  maxWidth: '420px',
-  width: '100%',
-  border: '1px solid #e8ddd0',
-};
-const logoAreaStyle = { textAlign: 'center', marginBottom: '32px' };
-const logoMarkStyle = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '56px',
-  height: '56px',
-  borderRadius: '14px',
-  background: 'linear-gradient(135deg, #c47f3a 0%, #8b5a2b 100%)',
-  color: '#fff',
-  fontSize: '1.2rem',
-  fontWeight: '700',
-  letterSpacing: '0.5px',
-  marginBottom: '14px',
-};
-const headingStyle = {
-  margin: '0 0 6px',
-  fontSize: '1.7rem',
-  color: '#3d2b1a',
-  fontWeight: '700',
-  letterSpacing: '-0.3px',
-};
-const subheadingStyle = {
-  margin: 0,
-  fontSize: '0.92rem',
-  color: '#8a7060',
-  fontFamily: "'system-ui', sans-serif",
-};
-const errorStyle = {
-  backgroundColor: '#fff5f0',
-  border: '1px solid #f5c6a8',
-  color: '#8b3a1a',
-  borderRadius: '8px',
-  padding: '10px 14px',
-  fontSize: '0.88rem',
-  marginBottom: '20px',
-  fontFamily: "'system-ui', sans-serif",
-};
-const inputGroupStyle = { marginBottom: '20px', display: 'flex', flexDirection: 'column' };
-const labelStyle = {
-  fontFamily: "'system-ui', sans-serif",
-  fontWeight: '600',
-  fontSize: '0.82rem',
-  color: '#5a3e2b',
-  marginBottom: '7px',
-  letterSpacing: '0.3px',
-  textTransform: 'uppercase',
-};
-const inputStyle = {
-  padding: '11px 14px',
-  borderRadius: '8px',
-  border: '1.5px solid #d9c8b5',
-  fontSize: '0.97rem',
-  color: '#3d2b1a',
-  background: '#fffaf6',
-  fontFamily: "'system-ui', sans-serif",
-  outline: 'none',
-};
-const buttonStyle = {
-  width: '100%',
-  background: 'linear-gradient(135deg, #c47f3a 0%, #8b5a2b 100%)',
-  color: '#fff',
-  border: 'none',
-  padding: '13px',
-  borderRadius: '8px',
-  fontSize: '1rem',
-  fontWeight: '700',
-  cursor: 'pointer',
-  marginTop: '8px',
-  fontFamily: "'system-ui', sans-serif",
-  boxShadow: '0 2px 8px rgba(139,90,43,0.25)',
-};
