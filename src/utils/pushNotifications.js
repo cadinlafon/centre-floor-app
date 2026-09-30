@@ -2,7 +2,7 @@ import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { ONESIGNAL_APP_ID, ONESIGNAL_ENABLED, ONESIGNAL_SAFARI_WEB_ID } from '../config';
 
-const ONESIGNAL_SCRIPT_URL = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.js';
+const ONESIGNAL_SCRIPT_URL = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
 
 let oneSignalPromise = null;
 
